@@ -170,3 +170,107 @@ resource "aws_lb_target_group_attachment" "nlb_attachment" {
   target_id        = aws_instance.web.id
   port             = 80
 }
+
+# Detect AWS Config rule
+#IAM
+resource "aws_config_config_rule" "iam_root_access_key_check" {
+  name = "iam-root-access-key-check"
+  source {
+    owner             = "AWS"
+    source_identifier = "IAM_ROOT_ACCESS_KEY_CHECK"
+  }
+}
+
+resource "aws_config_config_rule" "access_keys_rotated" {
+  name = "access-keys-rotated"
+  source {
+    owner             = "AWS"
+    source_identifier = "ACCESS_KEYS_ROTATED"
+  }
+}
+
+#S3 rule
+resource "aws_config_config_rule" "s3_public_read_prohibited" {
+  name = "s3-bucket-public-read-prohibited"
+  source {
+    owner             = "AWS"
+    source_identifier = "S3_BUCKET_PUBLIC_READ_PROHIBITED"
+  }
+}
+
+resource "aws_config_config_rule" "s3_encryption_enabled" {
+  name = "s3-bucket-server-side-encryption-enabled"
+  source {
+    owner             = "AWS"
+    source_identifier = "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED"
+  }
+}
+
+#VPC rule
+resource "aws_config_config_rule" "vpc_flow_logs_enabled" {
+  name = "vpc-flow-logs-enabled"
+  source {
+    owner             = "AWS"
+    source_identifier = "VPC_FLOW_LOGS_ENABLED"
+  }
+}
+
+resource "aws_config_config_rule" "vpc_default_sg_closed" {
+  name = "vpc-default-security-group-closed"
+  source {
+    owner             = "AWS"
+    source_identifier = "VPC_DEFAULT_SECURITY_GROUP_CLOSED"
+  }
+}
+
+#EC2 Rule
+resource "aws_config_config_rule" "ec2_no_public_ip" {
+  name = "ec2-instance-no-public-ip"
+  source {
+    owner             = "AWS"
+    source_identifier = "EC2_INSTANCE_NO_PUBLIC_IP"
+  }
+}
+
+resource "aws_config_config_rule" "ec2_imdsv2_check" {
+  name = "ec2-imdsv2-check"
+  source {
+    owner             = "AWS"
+    source_identifier = "EC2_IMDSV2_CHECK"
+  }
+}
+
+# ALB rule
+
+resource "aws_config_config_rule" "alb_https_listener" {
+  name = "alb-https-listeners"
+  source {
+    owner             = "AWS"
+    source_identifier = "ALB_HTTPS_LISTENERS"
+  }
+}
+
+resource "aws_config_config_rule" "alb_logging_enabled" {
+  name = "alb-logging-enabled"
+  source {
+    owner             = "AWS"
+    source_identifier = "ALB_LOGGING_ENABLED"
+  }
+}
+
+#NLB rule
+resource "aws_config_config_rule" "nlb_cross_zone_enabled" {
+  name = "nlb-cross-zone-load-balancing-enabled"
+  source {
+    owner             = "AWS"
+    source_identifier = "NLB_CROSS_ZONE_LOAD_BALANCING_ENABLED"
+  }
+}
+
+resource "aws_config_config_rule" "nlb_logging_enabled" {
+  name = "nlb-logging-enabled"
+  source {
+    owner             = "AWS"
+    source_identifier = "NLB_LOGGING_ENABLED"
+  }
+}
