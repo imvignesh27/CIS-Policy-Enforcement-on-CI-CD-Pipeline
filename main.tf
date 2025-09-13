@@ -1,36 +1,66 @@
-provider "aws" {
-  region = "ap-south-1"
+# Fetch available AZs
+data "aws_availability_zones" "available" {}
+
+# IAM Role & Policy
+resource "aws_iam_role" "ec2_role" {
+  name = "ec2_basic_role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = { Service = "ec2.amazonaws.com" },
+      Action = "sts:AssumeRole"
+    }]
+  })
 }
 
-resource "aws_vpc" "race" {
-  cidr_block = "100.0.0.0/16"
-  tags = {
-    Name = "race-vpc"
-  }
+resource "aws_iam_role_policy" "ec2_policy" {
+  name   = "ec2_basic_policy"
+  role   = aws_iam_role.ec2_role.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Action = ["s3:ListBucket", "s3:GetObject"],
+      Resource = "*"
+    }]
+  })
 }
 
-resource "aws_subnet" "public_a" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = "100.0.10.0/24"
-  availability_zone = "ap-south-1a"
-  tags = {
-    Name = "public-subnet-a"
-  }
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "ec2_profile"
+  role = aws_iam_role.ec2_role.name
 }
 
-resource "aws_subnet" "public_b" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = "100.0.20.0/24"
-  availability_zone = "ap-south-1b"
-  tags = {
-    Name = "public-subnet-b"
-  }
+# S3 Bucket
+resource "aws_s3_bucket" "app_bucket" {
+  bucket = var.bucket_name
+  acl    = "private"
 }
 
-resource "aws_security_group" "web" {
-  name        = "web-sg"
-  description = "Allow web, SSH, HTTPS, and RDP"
-  vpc_id      = aws_vpc.race.id
+# VPC
+resource "aws_vpc" "main" {
+  cidr_block = "20.0.0.0/16"
+}
+
+# Subnets in two AZs
+resource "aws_subnet" "subnet_a" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "20.0.1.0/24"
+  availability_zone = data.aws_availability_zones.available.names[0]
+}
+
+resource "aws_subnet" "subnet_b" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "20.0.2.0/24"
+  availability_zone = data.aws_availability_zones.available.names[1]
+}
+
+# Security Group
+resource "aws_security_group" "web_sg" {
+  name        = "web_sg"
+  description = "Allow SSH and HTTP"
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port   = 22
@@ -38,24 +68,14 @@ resource "aws_security_group" "web" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 3389
-    to_port     = 3389
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -64,46 +84,89 @@ resource "aws_security_group" "web" {
   }
 }
 
-resource "aws_iam_role" "web-admin" {
-  name = "dev-admin-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-    }]
-  })
-}
+# EC2 Instance
+resource "aws_instance" "web" {
+  ami                    = "ami-0b9093ea00a0fed922"
+  instance_type          = var.instance_type
+  subnet_id              = aws_subnet.subnet_a.id
+  key_name               = var.key_name
+  security_groups        = [aws_security_group.web_sg.name]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
-resource "aws_s3_bucket" "bucket1" {
-  bucket = "race-bucket"
-  acl    = "public"
-}
-
-resource "aws_instance" "web-server" {
-  ami                    = "ami-0c94855ba95c71c99" # Update to a valid AMI for your region
-  instance_type          = "t2.micro"
-  subnet_id              = aws_subnet.public_a.id
-  vpc_security_group_ids = [aws_security_group.web.id]
-  iam_instance_profile   = aws_iam_role.web-server.name
   tags = {
-    Name = "web-server"
+    Name = "Jenkins-Terraform-EC2"
   }
 }
 
-resource "aws_lb" "web_alb" {
-  name               = "web-alb"
+# ALB
+resource "aws_lb" "app_alb" {
+  name               = "app-alb"
   internal           = false
   load_balancer_type = "application"
-  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
-  security_groups    = [aws_security_group.web.id]
+  subnets            = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
+  security_groups    = [aws_security_group.web_sg.id]
 }
 
-resource "aws_lb" "web_nlb" {
-  name               = "web-nlb"
+# ALB Target Group
+resource "aws_lb_target_group" "alb_tg" {
+  name        = "alb-target-group"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "instance"
+}
+
+# ALB Listener
+resource "aws_lb_listener" "alb_listener" {
+  load_balancer_arn = aws_lb.app_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.alb_tg.arn
+  }
+}
+
+# ALB Target Attachment
+resource "aws_lb_target_group_attachment" "alb_attachment" {
+  target_group_arn = aws_lb_target_group.alb_tg.arn
+  target_id        = aws_instance.web.id
+  port             = 80
+}
+
+# NLB
+resource "aws_lb" "app_nlb" {
+  name               = "app-nlb"
   internal           = false
   load_balancer_type = "network"
-  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
-  # NLB does not support security groups
+  subnets            = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
+}
+
+# NLB Target Group
+resource "aws_lb_target_group" "nlb_tg" {
+  name        = "nlb-target-group"
+  port        = 80
+  protocol    = "TCP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "instance"
+}
+
+# NLB Listener
+resource "aws_lb_listener" "nlb_listener" {
+  load_balancer_arn = aws_lb.app_nlb.arn
+  port              = 80
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.nlb_tg.arn
+  }
+}
+
+# NLB Target Attachment
+resource "aws_lb_target_group_attachment" "nlb_attachment" {
+  target_group_arn = aws_lb_target_group.nlb_tg.arn
+  target_id        = aws_instance.web.id
+  port             = 80
 }
