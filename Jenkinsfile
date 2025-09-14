@@ -34,7 +34,7 @@ pipeline {
     stage('Terraform Compliance Check') {
       steps {
         sh '''
-          pip install terraform-compliance
+          pip install terraform-compliance --break-system-packages
           terraform-compliance -p plan.json -f features/
         '''
       }
