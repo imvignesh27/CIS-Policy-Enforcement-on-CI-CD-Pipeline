@@ -18,7 +18,7 @@ pipeline {
       steps {
         withCredentials([[
           $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-creds-id' // Replace with your actual AWS creds ID in Jenkins
+          credentialsId: 'AWS' // Replace with your actual AWS creds ID in Jenkins
         ]]) {
           sh 'terraform init'
           sh 'terraform plan -out=tfplan.out'
