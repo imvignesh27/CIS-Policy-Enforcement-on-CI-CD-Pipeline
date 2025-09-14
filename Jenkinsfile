@@ -7,6 +7,7 @@ pipeline {
   stages {
     stage('Checkout') {
       steps {
+        git branch: 'main',
         git 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
       }
     }
