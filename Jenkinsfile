@@ -1,25 +1,28 @@
 pipeline {
   agent any
-
   environment {
     AWS_DEFAULT_REGION = 'ap-south-1'
-    // This injects the credentials as environment variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+    AWS_CREDENTIALS = credentials('aws-creds-id')    // If using Jenkins stored credentials
   }
-
   stages {
     stage('Checkout') {
       steps {
         git 'https://github.com/your-org/your-terraform-repo.git'
       }
     }
-
-    stage('Terraform Init & Plan') {
+    stage('Terraform Init') {
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds-id']]) {
-          sh 'terraform init'
-          sh 'terraform plan -out=tfplan.out'
-          sh 'terraform show -json tfplan.out > plan.json'
-        }
+        sh 'terraform init'
+      }
+    }
+    stage('Terraform Plan') {
+      steps {
+        sh 'terraform plan -out=tfplan.out'
+      }
+    }
+    stage('Terraform Apply') {
+      steps {
+        sh 'terraform apply -auto-approve tfplan.out'
       }
     }
   }
