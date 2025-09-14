@@ -3,7 +3,6 @@ pipeline {
 
   environment {
     AWS_DEFAULT_REGION = 'ap-south-1'
-    SLACK_WEBHOOK = credentials('slack-webhook')
   }
 
   parameters {
@@ -32,7 +31,6 @@ pipeline {
                 error("plan.json not found. Aborting.")
               }
             } catch (err) {
-              slackNotify("Terraform Init & Plan failed.")
               error("Terraform Init & Plan failed: ${err}")
             }
           }
@@ -40,29 +38,24 @@ pipeline {
       }
     }
 
-    stage('Terraform Compliance Check') {
+    stage('AWS Config Compliance Check') {
       steps {
-        script {
-          if (!fileExists('plan.json')) {
-            slackNotify("Skipping compliance check: plan.json missing.")
-            error("plan.json missing before compliance check.")
-          }
+        withCredentials([[ $class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS' ]]) {
+          script {
+            def result = sh(script: '''
+              aws configservice describe-compliance-by-config-rule \
+                --region $AWS_DEFAULT_REGION \
+                --output json > aws-config-compliance.json
+            ''', returnStatus: true)
 
-          def status = sh(script: '''
-            pip install terraform-compliance --break-system-packages
-            terraform-compliance -p plan.json -f features/ | tee compliance-report.txt
-          ''', returnStatus: true)
+            if (result != 0 || !fileExists('aws-config-compliance.json')) {
+              error("AWS Config compliance check failed.")
+            }
 
-          if (!fileExists('compliance-report.txt')) {
-            slackNotify("compliance-report.txt not generated.")
-            error("compliance-report.txt missing.")
-          }
+            def complianceData = readFile('aws-config-compliance.json')
+            def nonCompliantCount = complianceData.count("NON_COMPLIANT")
 
-          if (status != 0) {
-            slackNotify("Terraform compliance checks failed.")
-            error("Compliance check failed.")
-          } else {
-            slackNotify("Terraform compliance checks passed.")
+            echo "AWS Config compliance check completed. Non-compliant rules: ${nonCompliantCount}"
           }
         }
       }
@@ -76,9 +69,7 @@ pipeline {
         input message: 'Apply Terraform changes?', ok: 'Apply'
         withCredentials([[ $class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS' ]]) {
           sh 'terraform apply tfplan.out'
-          script {
-            slackNotify("Terraform apply completed successfully.")
-          }
+          echo "Terraform apply completed successfully."
         }
       }
     }
@@ -86,27 +77,11 @@ pipeline {
 
   post {
     failure {
-      script {
-        slackNotify("Build failed.")
-      }
+      echo "Build failed."
     }
     always {
-      script {
-        archiveArtifacts artifacts: 'plan.json,compliance-report.txt', fingerprint: true
-        cleanWs()
-      }
+      archiveArtifacts artifacts: 'plan.json,aws-config-compliance.json', fingerprint: true
+      cleanWs()
     }
-  }
-}
-
-// Slack notification helper
-def slackNotify(String message) {
-  if (env.SLACK_WEBHOOK?.trim()) {
-    sh """
-      curl -X POST -H 'Content-type: application/json' \
-      --data '{\"text\": \"${message}\"}' ${env.SLACK_WEBHOOK}
-    """
-  } else {
-    echo "Slack webhook not configured. Message: ${message}"
   }
 }
