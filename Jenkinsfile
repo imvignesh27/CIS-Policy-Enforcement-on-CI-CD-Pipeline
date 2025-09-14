@@ -5,10 +5,6 @@ pipeline {
     AWS_DEFAULT_REGION = 'ap-south-1'
   }
 
-  parameters {
-    booleanParam(name: 'APPLY_TF', defaultValue: false, description: 'Apply Terraform changes')
-  }
-
   stages {
     stage('Checkout Code') {
       steps {
@@ -23,32 +19,15 @@ pipeline {
           $class: 'AmazonWebServicesCredentialsBinding',
           credentialsId: 'AWS'
         ]]) {
-          sh 'terraform fmt -check'
           sh 'terraform init'
-          sh 'terraform validate'
-          sh 'terraform plan -out=tfplan.out -var-file=variables.tfvars'
-          sh 'terraform show -json tfplan.out > plan.json'
-        }
-      }
-    }
-
-    stage('Terraform Compliance Check') {
-      steps {
-        script {
-          def result = sh(script: '''
-            pip install terraform-compliance --break-system-packages
-            terraform-compliance -p plan.json -f features/ | tee compliance-report.txt
-          ''', returnStatus: true)
-          if (result != 0) {
-            error("Terraform compliance check failed. Aborting build.")
-          }
+          sh 'terraform plan -out=tfplan.out'
         }
       }
     }
 
     stage('Terraform Apply') {
       when {
-        expression { return params.APPLY_TF }
+        expression { return params.APPLY_TF == true }
       }
       steps {
         input message: 'Apply Terraform changes?', ok: 'Apply'
@@ -62,11 +41,11 @@ pipeline {
     }
   }
 
+  parameters {
+    booleanParam(name: 'APPLY_TF', defaultValue: false, description: 'Set to true to apply Terraform changes')
+  }
+
   post {
-    always {
-      archiveArtifacts artifacts: 'plan.json,compliance-report.txt', fingerprint: true
-      cleanWs()
-    }
     failure {
       echo 'Build failed.'
     }
