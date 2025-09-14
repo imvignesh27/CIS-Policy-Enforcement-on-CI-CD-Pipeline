@@ -1,24 +1,19 @@
 pipeline {
   agent any
-
   environment {
-    AWS_REGION = 'ap-south-1'
-    TF_WORKSPACE = 'default'
+    AWS_DEFAULT_REGION = 'ap-south-1'
+    AWS_CREDENTIALS = credentials('aws-creds-id')
   }
-
   stages {
-    stage('Clone Terraform Repo from GitHub') {
+    stage('Checkout') {
       steps {
-        git branch: 'main',
-            url: 'https://github.com/your-org/your-terraform-repo.git'
+        git 'https://github.com/your-org/your-terraform-repo.git'
       }
     }
-
-    stage('Terraform Init') {
+    stage('Terraform Init & Plan') {
       steps {
-        sh '''
-          terraform init
-          terraform workspace select ${TF_WORKSPACE} || terraform workspace new ${TF_WORKSPACE}
-        '''
+        sh 'terraform init'
+        sh 'terraform plan -out=tfplan.out'
+        sh 'terraform show -json tfplan.out > plan.json'
       }
     }
