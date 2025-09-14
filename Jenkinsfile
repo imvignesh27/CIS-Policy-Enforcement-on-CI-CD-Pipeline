@@ -17,10 +17,10 @@ pipeline {
       steps {
         withCredentials([[
           $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'AWS'
+          credentialsId: 'AWS' // Replace with your actual AWS creds ID in Jenkins
         ]]) {
           sh 'terraform init'
-          sh 'terraform plan -out=tfplan.out'
+          sh 'terraform plan -out=tfplan.out -var-file=terraform.tfvars'  // Reference tfvars file
         }
       }
     }
@@ -35,7 +35,7 @@ pipeline {
           $class: 'AmazonWebServicesCredentialsBinding',
           credentialsId: 'AWS'
         ]]) {
-          sh 'terraform apply tfplan.out'
+          sh 'terraform apply -var-file=terraform.tfvars tfplan.out'  // Reference tfvars file
         }
       }
     }
