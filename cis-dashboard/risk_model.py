@@ -19,4 +19,5 @@ def calculate_risk(violations):
         total_score += score
 
     normalized = min(total_score, 100)
-    return normalized, categorized
+    category_counts = {k: len(v) for k, v in categorized.items()}
+    return normalized, categorized, category_counts
