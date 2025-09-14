@@ -1,19 +1,23 @@
-from flask import Flask, render_template
-from parser import parse_compliance, parse_plan
-from risk_model import calculate_risk
+def categorize_violation(v):
+    v = v.lower()
+    if "public" in v or "0.0.0.0/0" in v or "*" in v or "mfa" in v:
+        return "Critical", 5
+    elif "encryption" in v or "cloudtrail" in v or "admin" in v:
+        return "High", 4
+    elif "monitoring" in v or "tags" in v or "unused" in v:
+        return "Medium", 2
+    else:
+        return "Low", 1
 
-app = Flask(__name__)
+def calculate_risk(violations):
+    categorized = {"Critical": [], "High": [], "Medium": [], "Low": []}
+    total_score = 0
 
-@app.route('/')
-def dashboard():
-    plan_data = parse_plan('data/plan.json')
-    compliance_data = parse_compliance('data/compliance-report.txt')
-    risk_score, violations = calculate_risk(compliance_data)
+    for v in violations:
+        category, score = categorize_violation(v)
+        categorized[category].append(v)
+        total_score += score
 
-    return render_template('dashboard.html',
-                           risk_score=risk_score,
-                           violations=violations,
-                           resources=plan_data)
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    normalized = min(total_score, 100)
+    category_counts = {k: len(v) for k, v in categorized.items()}
+    return normalized, categorized, category_counts
