@@ -4,7 +4,7 @@ pipeline {
   environment {
     AWS_DEFAULT_REGION = 'ap-south-1'
     SLACK_WEBHOOK = credentials('slack-webhook') // Store webhook URL securely in Jenkins credentials
-    DASHBOARD_PATH = '/var/www/cis_dashboard/data/' // Path to Flask dashboard's data folder
+    DASHBOARD_PATH = '/home/vignesh/cis-dashboard/data/' // Path to Flask dashboard's data folder
   }
 
   parameters {
