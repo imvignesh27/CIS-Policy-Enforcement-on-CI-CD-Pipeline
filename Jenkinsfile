@@ -2,7 +2,7 @@ pipeline {
   agent any
   environment {
     AWS_DEFAULT_REGION = 'ap-south-1'
-    AWS_CREDENTIALS = credentials('aws-creds-id')    // If using Jenkins stored credentials
+    AWS_CREDENTIALS = credentials('AWS')    // If using Jenkins stored credentials
   }
   stages {
     stage('Checkout') {
