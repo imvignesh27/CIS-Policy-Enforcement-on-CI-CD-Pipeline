@@ -31,6 +31,15 @@ pipeline {
       }
     }
 
+    stage('Terraform Compliance Check') {
+      steps {
+        sh '''
+          pip install terraform-compliance
+          terraform-compliance -p plan.json -f features/
+        '''
+      }
+    }
+
     stage('Terraform Apply') {
       when {
         expression { return params.APPLY_TF }
