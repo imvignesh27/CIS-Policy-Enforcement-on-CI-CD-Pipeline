@@ -3,8 +3,8 @@ pipeline {
 
   environment {
     AWS_DEFAULT_REGION = 'ap-south-1'
-    SLACK_WEBHOOK = credentials('slack-webhook') // Store webhook URL securely in Jenkins credentials
-    DASHBOARD_PATH = '/home/vignesh/cis-dashboard/data/' // Path to Flask dashboard's data folder
+    SLACK_WEBHOOK = credentials('slack-webhook') // Store webhook securely in Jenkins credentials
+    DASHBOARD_PATH = '/home/vignesh/cis-dashboard/data/' // Flask dashboard data folder
   }
 
   parameters {
@@ -42,14 +42,12 @@ pipeline {
             terraform-compliance -p plan.json -f features/ | tee compliance-report.txt
           ''', returnStatus: true)
 
-          // Parse violations
           def violations = readFile('compliance-report.txt').split('\n').findAll { it.contains('FAILED') }
           def critical = violations.findAll { it.toLowerCase().contains('public') || it.contains('0.0.0.0/0') || it.contains('*') || it.toLowerCase().contains('mfa') }
           def high = violations.findAll { it.toLowerCase().contains('encryption') || it.toLowerCase().contains('cloudtrail') || it.toLowerCase().contains('admin') }
           def riskScore = (critical.size() * 5) + (high.size() * 4) + ((violations.size() - critical.size() - high.size()) * 2)
           riskScore = Math.min(riskScore, 100)
 
-          // Send Slack alert if needed
           if (riskScore >= 70 || critical.size() > 0) {
             def message = "*🚨 CIS Compliance Alert*\nRisk Score: ${riskScore}/100\n"
             if (critical.size() > 0) {
