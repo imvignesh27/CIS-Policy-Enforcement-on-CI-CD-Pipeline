@@ -5,10 +5,13 @@ pipeline {
     AWS_DEFAULT_REGION = 'ap-south-1'
   }
 
+  parameters {
+    booleanParam(name: 'APPLY_TF', defaultValue: false, description: 'Apply Terraform changes')
+  }
+
   stages {
     stage('Checkout Code') {
       steps {
-        // This repo is public, so no credentials needed.
         git branch: 'main',
             url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
       }
@@ -16,20 +19,39 @@ pipeline {
 
     stage('Terraform Init & Plan') {
       steps {
-        withCredentials([[ 
-          $class: 'AmazonWebServicesCredentialsBinding', 
-          credentialsId: 'AWS' // Replace with your actual AWS creds ID in Jenkins
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'AWS'
         ]]) {
           sh 'terraform init'
-          // Use the .tfvars file for Terraform plan
+          sh 'terraform validate'
           sh 'terraform plan -out=tfplan.out -var-file=variables.tfvars'
           sh 'terraform show -json tfplan.out > plan.json'
+        }
+      }
+    }
+
+    stage('Terraform Apply') {
+      when {
+        expression { return params.APPLY_TF }
+      }
+      steps {
+        input message: 'Apply Terraform changes?', ok: 'Apply'
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'AWS'
+        ]]) {
+          sh 'terraform apply tfplan.out'
         }
       }
     }
   }
 
   post {
+    always {
+      archiveArtifacts artifacts: 'plan.json', fingerprint: true
+      cleanWs()
+    }
     failure {
       echo 'Build failed.'
     }
