@@ -1,24 +1,54 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>AWS resource Compliance Dashboard</title>
+  <title>CIS Compliance Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <h1>CIS Compliance Dashboard</h1>
-  <h2>Risk Score: {{ risk_score }}/100</h2>
+  <h2>Total Risk Score: {{ risk_score }}/100</h2>
 
-  <canvas id="riskChart" width="400" height="200"></canvas>
-  <script src="/static/charts.js"></script>
+  <canvas id="severityChart" width="400" height="200"></canvas>
+  <script>
+    const ctx = document.getElementById('severityChart').getContext('2d');
+    const severityChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['Critical', 'High', 'Medium', 'Low'],
+        datasets: [{
+          label: 'Violation Count',
+          data: [
+            {{ category_counts['Critical'] }},
+            {{ category_counts['High'] }},
+            {{ category_counts['Medium'] }},
+            {{ category_counts['Low'] }}
+          ],
+          backgroundColor: ['#ff0000', '#ff9800', '#ffc107', '#4caf50']
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          y: { beginAtZero: true }
+        }
+      }
+    });
+  </script>
 
-  <h3>Violations</h3>
-  <ul>
-    {% for v in violations %}
-      <li>{{ v }}</li>
-    {% endfor %}
-  </ul>
+  <h3>Violations by Severity</h3>
+  {% for category, items in categorized.items() %}
+    <h4>{{ category }} ({{ items|length }})</h4>
+    <ul>
+      {% for v in items %}
+        <li>{{ v }}</li>
+      {% endfor %}
+    </ul>
+  {% endfor %}
 
-  <h3>Resources</h3>
+  <h3>Terraform Resources</h3>
   <ul>
     {% for r in resources %}
       <li>{{ r.address }} ({{ r.type }})</li>
