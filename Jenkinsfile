@@ -1,73 +1,72 @@
 pipeline {
   agent any
+
   environment {
-    AWS_DEFAULT_REGION = 'a--south-1'
-    AWS_CREDENTIALS = credentials('aws-creds-id')  // Ensure this credential ID exists
-    SLACK_WEBHOOK = credentials('slack-webhook')
+    AWS_DEFAULT_REGION = 'ap-south-1'
   }
-  options {
-    buildDiscarder(logRotator(numToKeepStr: '10'))
-    timeout(time: 30, unit: 'MINUTES')
+
+  parameters {
+    booleanParam(name: 'APPLY_TF', defaultValue: false, description: 'Set to true to apply Terraform changes')
   }
-  triggers {
-    pollSCM('H/10 * * * *')
-  }
+
   stages {
-    stage('Checkout SCM') {
+    stage('Checkout Code') {
       steps {
-        git branch: 'main', url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
+        git branch: 'main',
+            url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
       }
     }
-    stage('Terraform Init') {
+
+    stage('Terraform Init & Plan') {
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${env.AWS_CREDENTIALS}"]]) {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'AWS'
+        ]]) {
+          sh 'terraform fmt'
           sh 'terraform init'
-        }
-      }
-    }
-    stage('Terraform Plan') {
-      steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${env.AWS_CREDENTIALS}"]]) {
+          sh 'terraform validate'
           sh 'terraform plan -out=tfplan.out'
+          sh 'terraform show -json tfplan.out > plan.json'
         }
       }
     }
+
+    stage('Terraform Compliance Check') {
+      steps {
+        sh '''
+          pip install terraform-compliance --break-system-packages
+          terraform-compliance -p plan.json -f features/ | tee compliance-report.txt
+        '''
+      }
+    }
+
     stage('Terraform Apply') {
-      steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${env.AWS_CREDENTIALS}"]]) {
-          sh 'terraform apply -auto-approve tfplan.out'
-        }
+      when {
+        expression { return params.APPLY_TF }
       }
-    }
-    stage('Notify Slack') {
       steps {
-        script {
-          def message = "Terraform deployment for main branch completed successfully!"
-          def payload = """{
-            \"text\": \"${message}\"
-          }"""
-          sh "curl -X POST -H 'Content-type: application/json' --data '${payload}' ${env.SLACK_WEBHOOK}"
+        input message: 'Apply Terraform changes?', ok: 'Apply'
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'AWS'
+        ]]) {
+          sh 'terraform apply tfplan.out'
         }
       }
     }
   }
+
   post {
-    failure {
-      node {
-        script {
-          def message = "Terraform deployment for main branch failed."
-          def payload = """{
-            \"text\": \"${message}\"
-          }"""
-          sh "curl -X POST -H 'Content-type: application/json' --data '${payload}' ${env.SLACK_WEBHOOK}"
-        }
-      }
-    }
     always {
-      node {
-        archiveArtifacts artifacts: '**/*.tfplan,**/*.tfstate,**/*.log', allowEmptyArchive: true
-        cleanWs()
-      }
+      archiveArtifacts artifacts: 'plan.json,compliance-report.txt', fingerprint: true
+      cleanWs()
+    }
+    failure {
+      echo '❌ Build failed.'
+    }
+    success {
+      echo '✅ Build completed successfully.'
     }
   }
 }
