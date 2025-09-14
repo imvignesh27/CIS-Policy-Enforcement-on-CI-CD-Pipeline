@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>AWS resource Compliance Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h1>CIS Compliance Dashboard</h1>
+  <h2>Risk Score: {{ risk_score }}/100</h2>
+
+  <canvas id="riskChart" width="400" height="200"></canvas>
+  <script src="/static/charts.js"></script>
+
+  <h3>Violations</h3>
+  <ul>
+    {% for v in violations %}
+      <li>{{ v }}</li>
+    {% endfor %}
+  </ul>
+
+  <h3>Resources</h3>
+  <ul>
+    {% for r in resources %}
+      <li>{{ r.address }} ({{ r.type }})</li>
+    {% endfor %}
+  </ul>
+</body>
+</html>
