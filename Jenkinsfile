@@ -17,3 +17,5 @@ pipeline {
         sh 'terraform show -json tfplan.out > plan.json'
       }
     }
+  } 
+}
