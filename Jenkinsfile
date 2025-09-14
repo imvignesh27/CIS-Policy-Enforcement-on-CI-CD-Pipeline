@@ -1,31 +1,23 @@
 pipeline {
   agent any
-
   environment {
-    AWS_DEFAULT_REGION = 'us-east-1'
-    AWS_CREDENTIALS = credentials('aws-creds-id')
+    AWS_DEFAULT_REGION = 'a--south-1'
+    AWS_CREDENTIALS = credentials('aws-creds-id')  // Ensure this credential ID exists
     SLACK_WEBHOOK = credentials('slack-webhook')
   }
-
   options {
-    // Keep only last 10 builds
     buildDiscarder(logRotator(numToKeepStr: '10'))
-    // Timeout after 30 minutes
     timeout(time: 30, unit: 'MINUTES')
   }
-
   triggers {
-    pollSCM('H/10 * * * *') // Poll Git every 10 minutes
+    pollSCM('H/10 * * * *')
   }
-
   stages {
     stage('Checkout SCM') {
       steps {
-        // Checkout main branch explicitly
         git branch: 'main', url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
       }
     }
-
     stage('Terraform Init') {
       steps {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${env.AWS_CREDENTIALS}"]]) {
@@ -33,7 +25,6 @@ pipeline {
         }
       }
     }
-
     stage('Terraform Plan') {
       steps {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${env.AWS_CREDENTIALS}"]]) {
@@ -41,7 +32,6 @@ pipeline {
         }
       }
     }
-
     stage('Terraform Apply') {
       steps {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${env.AWS_CREDENTIALS}"]]) {
@@ -49,7 +39,6 @@ pipeline {
         }
       }
     }
-
     stage('Notify Slack') {
       steps {
         script {
@@ -62,20 +51,23 @@ pipeline {
       }
     }
   }
-
   post {
     failure {
-      script {
-        def message = "Terraform deployment for main branch failed."
-        def payload = """{
-          \"text\": \"${message}\"
-        }"""
-        sh "curl -X POST -H 'Content-type: application/json' --data '${payload}' ${env.SLACK_WEBHOOK}"
+      node {
+        script {
+          def message = "Terraform deployment for main branch failed."
+          def payload = """{
+            \"text\": \"${message}\"
+          }"""
+          sh "curl -X POST -H 'Content-type: application/json' --data '${payload}' ${env.SLACK_WEBHOOK}"
+        }
       }
     }
     always {
-      archiveArtifacts artifacts: '**/*.tfplan,**/*.tfstate,**/*.log', allowEmptyArchive: true
-      cleanWs()
+      node {
+        archiveArtifacts artifacts: '**/*.tfplan,**/*.tfstate,**/*.log', allowEmptyArchive: true
+        cleanWs()
+      }
     }
   }
 }
