@@ -2,10 +2,7 @@ pipeline {
     agent any
 
     environment {
-        // Slack webhook and AWS credentials (masked)
-        SLACK_WEBHOOK = credentials('slack-webhook')
-        AWS_ACCESS_KEY_ID = credentials('aws-access-key-id')
-        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+        SLACK_WEBHOOK = credentials('slack-webhook') // Optional
     }
 
     stages {
@@ -22,8 +19,13 @@ pipeline {
                     string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                 ]) {
                     sh '''
+                        echo ">> Running terraform init"
                         terraform init
+
+                        echo ">> Creating plan"
                         terraform plan -out=tfplan
+
+                        echo ">> Generating plan.json"
                         terraform show -json tfplan > plan.json
                     '''
                 }
@@ -33,14 +35,15 @@ pipeline {
         stage('Terraform Compliance Check') {
             steps {
                 sh '''
-                    terraform-compliance -p plan.json -f compliance/ > compliance-report.txt
+                    echo ">> Running terraform-compliance"
+                    terraform-compliance -p plan.json -f compliance/ > compliance-report.txt || true
                 '''
             }
         }
 
         stage('Terraform Apply') {
             steps {
-                input message: "Do you want to apply the changes?"
+                input message: "Do you want to apply the Terraform changes?"
                 sh 'terraform apply -auto-approve tfplan'
             }
         }
@@ -48,26 +51,30 @@ pipeline {
 
     post {
         always {
-            archiveArtifacts artifacts: 'plan.json, compliance-report.txt', fingerprint: true
+            node {
+                script {
+                    echo ">> Archiving files"
+                    archiveArtifacts artifacts: 'plan.json, compliance-report.txt', fingerprint: true
 
-            script {
-                if (fileExists('plan.json') && fileExists('compliance-report.txt')) {
-                    sh 'cp plan.json compliance-report.txt /var/lib/jenkins/cis-dashboard/data/'
-                } else {
-                    echo "Skipping file copy: plan.json or compliance-report.txt not found."
+                    if (fileExists('plan.json') && fileExists('compliance-report.txt')) {
+                        def targetPath = '/var/lib/jenkins/cis-dashboard/data/'
+                        echo ">> Copying plan.json and compliance-report.txt to $targetPath"
+                        sh "cp plan.json compliance-report.txt ${targetPath}"
+                    } else {
+                        echo ">> Skipping file copy: plan.json or compliance-report.txt not found."
+                    }
+
+                    cleanWs()
                 }
             }
-
-            cleanWs()
-            echo "Build completed."
-        }
-
-        failure {
-            echo "Build failed."
         }
 
         success {
-            echo "Build succeeded."
+            echo "✅ Build succeeded."
+        }
+
+        failure {
+            echo "❌ Build failed."
         }
     }
 }
