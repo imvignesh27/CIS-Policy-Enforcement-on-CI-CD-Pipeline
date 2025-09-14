@@ -3,8 +3,8 @@ pipeline {
 
   environment {
     AWS_DEFAULT_REGION = 'ap-south-1'
-    SLACK_WEBHOOK = credentials('slack-webhook') // Store webhook securely in Jenkins credentials
-    DASHBOARD_PATH = '/var/lib/jenkins/cis-dashboard/data/' // Flask dashboard data folder
+    SLACK_WEBHOOK = credentials('slack-webhook') // Stored securely in Jenkins credentials
+    DASHBOARD_PATH = '/var/lib/jenkins/cis-dashboard/data/' // Flask dashboard folder
   }
 
   parameters {
@@ -42,7 +42,7 @@ pipeline {
             terraform-compliance -p plan.json -f features/ | tee compliance-report.txt
           ''', returnStatus: true)
 
-          def violations = readFile('compliance-report.txt').split('\n').findAll { it.contains('FAILED') }
+          def violations = fileExists('compliance-report.txt') ? readFile('compliance-report.txt').split('\n').findAll { it.contains('FAILED') } : []
           def critical = violations.findAll { it.toLowerCase().contains('public') || it.contains('0.0.0.0/0') || it.contains('*') || it.toLowerCase().contains('mfa') }
           def high = violations.findAll { it.toLowerCase().contains('encryption') || it.toLowerCase().contains('cloudtrail') || it.toLowerCase().contains('admin') }
           def riskScore = (critical.size() * 5) + (high.size() * 4) + ((violations.size() - critical.size() - high.size()) * 2)
@@ -90,12 +90,27 @@ pipeline {
   post {
     always {
       archiveArtifacts artifacts: 'plan.json,compliance-report.txt', fingerprint: true
-      sh 'cp plan.json compliance-report.txt $DASHBOARD_PATH'
+
+      script {
+        def dashboardPath = env.DASHBOARD_PATH
+        def planExists = fileExists('plan.json')
+        def reportExists = fileExists('compliance-report.txt')
+
+        if (planExists && reportExists) {
+          sh "cp plan.json compliance-report.txt ${dashboardPath}"
+          echo "Files copied to dashboard folder successfully."
+        } else {
+          echo "Skipping file copy: plan.json or compliance-report.txt not found."
+        }
+      }
+
       cleanWs()
     }
+
     failure {
       echo 'Build failed.'
     }
+
     success {
       echo 'Build completed successfully.'
     }
