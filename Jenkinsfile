@@ -23,6 +23,7 @@ pipeline {
           $class: 'AmazonWebServicesCredentialsBinding',
           credentialsId: 'AWS'
         ]]) {
+          sh 'terraform fmt -check'
           sh 'terraform init'
           sh 'terraform validate'
           sh 'terraform plan -out=tfplan.out -var-file=variables.tfvars'
@@ -33,10 +34,15 @@ pipeline {
 
     stage('Terraform Compliance Check') {
       steps {
-        sh '''
-          pip install terraform-compliance --break-system-packages
-          terraform-compliance -p plan.json -f features/
-        '''
+        script {
+          def result = sh(script: '''
+            pip install terraform-compliance --break-system-packages
+            terraform-compliance -p plan.json -f features/ | tee compliance-report.txt
+          ''', returnStatus: true)
+          if (result != 0) {
+            error("Terraform compliance check failed. Aborting build.")
+          }
+        }
       }
     }
 
@@ -58,7 +64,7 @@ pipeline {
 
   post {
     always {
-      archiveArtifacts artifacts: 'plan.json', fingerprint: true
+      archiveArtifacts artifacts: 'plan.json,compliance-report.txt', fingerprint: true
       cleanWs()
     }
     failure {
