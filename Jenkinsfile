@@ -16,35 +16,17 @@ pipeline {
 
     stage('Terraform Init & Plan') {
       steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
+        withCredentials([[ 
+          $class: 'AmazonWebServicesCredentialsBinding', 
           credentialsId: 'AWS' // Replace with your actual AWS creds ID in Jenkins
         ]]) {
           sh 'terraform init'
-          sh 'terraform plan -out=tfplan.out'
+          // Use the .tfvars file for Terraform plan
+          sh 'terraform plan -out=tfplan.out -var-file=variables.tfvars'
           sh 'terraform show -json tfplan.out > plan.json'
         }
       }
     }
-
-    stage('Terraform Apply') {
-      when {
-        expression { return params.APPLY_TF == true }
-      }
-      steps {
-        input message: 'Apply Terraform changes?', ok: 'Apply'
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-creds-id'
-        ]]) {
-          sh 'terraform apply tfplan.out'
-        }
-      }
-    }
-  }
-
-  parameters {
-    booleanParam(name: 'APPLY_TF', defaultValue: false, description: 'Set to true to apply Terraform changes')
   }
 
   post {
