@@ -1,80 +1,134 @@
 pipeline {
-    agent any
+  agent any
 
-    environment {
-        SLACK_WEBHOOK = credentials('slack-webhook') // Optional
+  environment {
+    AWS_DEFAULT_REGION = 'ap-south-1'
+    SLACK_WEBHOOK = credentials('slack-webhook') // Stored securely in Jenkins credentials
+    DASHBOARD_PATH = '/var/lib/jenkins/cis-dashboard/data/' // Flask dashboard folder
+  }
+
+  parameters {
+    booleanParam(name: 'APPLY_TF', defaultValue: false, description: 'Set to true to apply Terraform changes')
+  }
+
+  stages {
+    stage('Checkout Code') {
+      steps {
+        git branch: 'main',
+            url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
+      }
     }
 
-    stages {
-        stage('Checkout Code') {
-            steps {
-                git url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git', branch: 'main'
+    stage('Terraform Init & Plan') {
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'AWS'
+        ]]) {
+          script {
+            try {
+              sh 'terraform fmt -check'
+              sh 'terraform init'
+              sh 'terraform validate'
+              sh 'terraform plan -out=tfplan.out'
+              sh 'terraform show -json tfplan.out > plan.json'
+              if (!fileExists('plan.json')) {
+                error("❌ plan.json was not generated. Aborting.")
+              }
+            } catch (err) {
+              error("Terraform Init & Plan failed: ${err}")
             }
+          }
         }
-
-        stage('Terraform Init & Plan') {
-            steps {
-                withCredentials([
-                    string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
-                ]) {
-                    sh '''
-                        echo ">> Running terraform init"
-                        terraform init
-
-                        echo ">> Creating plan"
-                        terraform plan -out=tfplan
-
-                        echo ">> Generating plan.json"
-                        terraform show -json tfplan > plan.json
-                    '''
-                }
-            }
-        }
-
-        stage('Terraform Compliance Check') {
-            steps {
-                sh '''
-                    echo ">> Running terraform-compliance"
-                    terraform-compliance -p plan.json -f compliance/ > compliance-report.txt || true
-                '''
-            }
-        }
-
-        stage('Terraform Apply') {
-            steps {
-                input message: "Do you want to apply the Terraform changes?"
-                sh 'terraform apply -auto-approve tfplan'
-            }
-        }
+      }
     }
 
-    post {
-        always {
-            node {
-                script {
-                    echo ">> Archiving files"
-                    archiveArtifacts artifacts: 'plan.json, compliance-report.txt', fingerprint: true
+    stage('Terraform Compliance Check') {
+      steps {
+        script {
+          try {
+            def result = sh(script: '''
+              pip install terraform-compliance --break-system-packages
+              terraform-compliance -p plan.json -f features/ | tee compliance-report.txt
+            ''', returnStatus: true)
 
-                    if (fileExists('plan.json') && fileExists('compliance-report.txt')) {
-                        def targetPath = '/var/lib/jenkins/cis-dashboard/data/'
-                        echo ">> Copying plan.json and compliance-report.txt to $targetPath"
-                        sh "cp plan.json compliance-report.txt ${targetPath}"
-                    } else {
-                        echo ">> Skipping file copy: plan.json or compliance-report.txt not found."
-                    }
-
-                    cleanWs()
-                }
+            if (!fileExists('compliance-report.txt')) {
+              error("❌ compliance-report.txt was not generated. Aborting.")
             }
-        }
 
-        success {
-            echo "✅ Build succeeded."
-        }
+            def violations = readFile('compliance-report.txt').split('\n').findAll { it.contains('FAILED') }
+            def critical = violations.findAll { it.toLowerCase().contains('public') || it.contains('0.0.0.0/0') || it.contains('*') || it.toLowerCase().contains('mfa') }
+            def high = violations.findAll { it.toLowerCase().contains('encryption') || it.toLowerCase().contains('cloudtrail') || it.toLowerCase().contains('admin') }
+            def riskScore = (critical.size() * 5) + (high.size() * 4) + ((violations.size() - critical.size() - high.size()) * 2)
+            riskScore = Math.min(riskScore, 100)
 
-        failure {
-            echo "❌ Build failed."
+            if (riskScore >= 70 || critical.size() > 0) {
+              def message = "*🚨 CIS Compliance Alert*\nRisk Score: ${riskScore}/100\n"
+              if (critical.size() > 0) {
+                message += "*Critical Violations:* ${critical.size()}\n"
+                critical.take(5).each { v -> message += "• ${v}\n" }
+              } else {
+                message += "No critical violations, but overall risk is high.\n"
+              }
+
+              sh """
+                curl -X POST -H 'Content-type: application/json' \
+                --data '{"text": "${message.replaceAll('"', '\\"')}"}' \
+                $SLACK_WEBHOOK
+              """
+            }
+
+            if (result != 0) {
+              error("Terraform compliance check failed. Aborting build.")
+            }
+          } catch (err) {
+            error("Terraform Compliance Check failed: ${err}")
+          }
         }
+      }
     }
+
+    stage('Terraform Apply') {
+      when {
+        expression { return params.APPLY_TF }
+      }
+      steps {
+        input message: 'Apply Terraform changes?', ok: 'Apply'
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'AWS'
+        ]]) {
+          sh 'terraform apply tfplan.out'
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      archiveArtifacts artifacts: 'plan.json,compliance-report.txt', fingerprint: true
+
+      script {
+        def planExists = fileExists('plan.json')
+        def reportExists = fileExists('compliance-report.txt')
+
+        if (planExists && reportExists) {
+          sh "cp plan.json compliance-report.txt ${env.DASHBOARD_PATH}"
+          echo "✅ Files copied to dashboard folder successfully."
+        } else {
+          echo "⚠️ Skipping file copy: plan.json or compliance-report.txt not found."
+        }
+      }
+
+      cleanWs()
+    }
+
+    failure {
+      echo '❌ Build failed.'
+    }
+
+    success {
+      echo '✅ Build completed successfully.'
+    }
+  }
 }
