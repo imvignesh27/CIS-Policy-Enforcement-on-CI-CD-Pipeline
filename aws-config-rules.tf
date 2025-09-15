@@ -2,14 +2,14 @@ provider "aws" {
   region = "ap-south-1"
 }
 
-# Generate a unique suffix for S3 bucket name
+# Generate a unique suffix for resource names
 resource "random_id" "suffix" {
   byte_length = 4
 }
 
 # S3 bucket for AWS Config logs
 resource "aws_s3_bucket" "config_logs" {
-  bucket = "my-config-logs-${random_id.suffix.hex}"
+  bucket = "cis-config-logs-${random_id.suffix.hex}"
 
   tags = {
     Project = "CIS-Compliance"
@@ -35,9 +35,24 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "config_logs_encry
   }
 }
 
+# Optional: Add lifecycle rule to expire logs after 365 days
+resource "aws_s3_bucket_lifecycle_configuration" "config_logs_lifecycle" {
+  bucket = aws_s3_bucket.config_logs.id
+
+  rule {
+    id     = "expire-logs"
+    status = "Enabled"
+
+    expiration {
+      days = 365
+    }
+  }
+}
+
 # IAM role for AWS Config
 resource "aws_iam_role" "config_role" {
-  name = "aws-config-role"
+  name = "cis-config-role-${random_id.suffix.hex}"
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
@@ -61,26 +76,34 @@ resource "aws_iam_role_policy_attachment" "config_policy_attach" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSConfigRole"
 }
 
-# AWS Config recorder
+# AWS Config recorder with global resource recording enabled
 resource "aws_config_configuration_recorder" "main" {
-  name     = "main"
+  name     = "cis-recorder-${random_id.suffix.hex}"
   role_arn = aws_iam_role.config_role.arn
+
+  recording_group {
+    all_supported                 = true
+    include_global_resource_types = true
+  }
 }
 
 # Delivery channel for AWS Config
 resource "aws_config_delivery_channel" "main" {
-  name           = "main"
+  name           = "cis-delivery-${random_id.suffix.hex}"
   s3_bucket_name = aws_s3_bucket.config_logs.bucket
-  depends_on     = [aws_config_configuration_recorder.main]
+
+  depends_on = [aws_config_configuration_recorder.main]
 }
 
-# Enable the configuration recorder
+# Enable the configuration recorder (after delivery channel exists)
 resource "aws_config_configuration_recorder_status" "enabled" {
   name       = aws_config_configuration_recorder.main.name
   is_enabled = true
+
+  depends_on = [aws_config_delivery_channel.main]
 }
 
-# Function to simplify rule creation
+# List of AWS Managed CIS Config rules
 locals {
   config_rules = [
     "IAM_PASSWORD_POLICY",
@@ -114,7 +137,7 @@ resource "aws_config_config_rule" "cis_rules" {
     source_identifier = each.key
   }
 
-  depends_on = [aws_config_delivery_channel.main]
+  depends_on = [aws_config_configuration_recorder_status.enabled]
 
   tags = {
     Project = "CIS-Compliance"
