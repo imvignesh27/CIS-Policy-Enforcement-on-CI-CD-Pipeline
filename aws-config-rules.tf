@@ -1,7 +1,3 @@
-provider "aws" {
-  region = "ap-south-1"
-}
-
 # Generate a unique suffix for resource names
 resource "random_id" "suffix" {
   byte_length = 4
