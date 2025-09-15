@@ -4,7 +4,7 @@ provider "aws" {
 
 # S3 bucket for Config logs
 resource "aws_s3_bucket" "config_logs" {
-  bucket = "my-config-logs-race-casptone" # CHANGE this to a unique name
+  bucket = "my-config-logs-race-project" # CHANGE this to a unique name
 }
 
 # AWS Config IAM role and policy
