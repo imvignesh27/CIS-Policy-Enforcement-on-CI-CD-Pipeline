@@ -23,3 +23,15 @@ variable "s3_bucket_name" {
   type        = string
   default     = "vpc-flow-log-vignesh-reva"
 }
+
+variable "vpc_ids" {
+  description = "List of VPC IDs to target for flow logs"
+  type        = list(string)
+  default     = []
+}
+
+variable "s3_bucket_ids" {
+  description = "List of S3 buckets to enforce versioning"
+  type        = list(string)
+  default     = []
+}
