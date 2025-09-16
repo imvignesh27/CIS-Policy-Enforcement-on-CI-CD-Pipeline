@@ -8,12 +8,14 @@ variable "instance_type" {
 
 variable "key_name" {
   description = "key1"
-  type        = string
+  type        =  string
+  default     =  "key1"
 }
 
 variable "bucket_name" {
-  description = "race-bucket-project2"
+  description = "s3-bucket"
   type        = string
+  default     = "race-bucket-project2"
 }
 
 variable "s3_bucket_name" {
