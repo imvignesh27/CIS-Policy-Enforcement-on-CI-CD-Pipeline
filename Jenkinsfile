@@ -1,125 +1,133 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    AWS_DEFAULT_REGION = 'ap-south-1'
-  }
-
-  parameters {
-    booleanParam(name: 'APPLY_TF', defaultValue: false, description: 'Set to true to apply Terraform changes')
-  }
-
-  stages {
-    stage('Checkout Code') {
-      steps {
-        git branch: 'main',
-            url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
-      }
+    environment {
+        AWS_DEFAULT_REGION = 'ap-south-1'
     }
 
-    stage('Terraform Init & Plan') {
-      steps {
-        withCredentials([[ $class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS' ]]) {
-          catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-            retry(2) {
-              sh '''
-                echo "Formatting Terraform files..."
-                terraform fmt -recursive
+    parameters {
+        booleanParam(name: 'APPLY_TF', defaultValue: false, description: 'Set to true to apply Terraform changes')
+    }
 
-                echo "Initializing Terraform..."
-                terraform init -input=false -no-color
-
-                echo "Validating Terraform configuration..."
-                terraform validate
-
-                echo "Planning Terraform changes..."
-                terraform plan -input=false -no-color -out=tfplan.out
-
-                echo "Exporting plan to JSON..."
-                terraform show -json tfplan.out > plan.json
-              '''
-              script {
-                if (!fileExists('plan.json')) {
-                  error("plan.json not found. Aborting.")
-                }
-              }
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
             }
-          }
         }
-      }
-    }
 
-    stage('AWS Config Compliance Check') {
-      steps {
-        withCredentials([[ $class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS' ]]) {
-          catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-            script {
-              def rules = ["ec2-imdsv2-check", "vpc-flow-logs-enabled"]
-              def nonCompliantRules = []
+        stage('Terraform Init & Plan') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        retry(2) {
+                            sh '''
+                                echo "Formatting Terraform files..."
+                                terraform fmt -recursive
 
-              for (rule in rules) {
-                def status = sh(
-                  script: """
-                    aws configservice describe-compliance-by-config-rule \
-                      --config-rule-names ${rule} \
-                      --region $AWS_DEFAULT_REGION \
-                      --query 'ComplianceByConfigRules[0].Compliance.ComplianceType' \
-                      --output text
-                  """,
-                  returnStdout: true
-                ).trim()
+                                echo "Initializing Terraform..."
+                                terraform init -input=false -no-color
 
-                if (status == "NON_COMPLIANT") {
-                  nonCompliantRules << rule
+                                echo "Validating Terraform configuration..."
+                                terraform validate
+                            '''
+                        }
+                    }
                 }
-              }
-
-              if (nonCompliantRules.size() > 0) {
-                echo "Found non-compliant rules: ${nonCompliantRules.join(', ')}"
-                writeFile file: 'noncompliant-rules.txt', text: nonCompliantRules.join(',')
-              } else {
-                echo "All monitored rules (IMDSv2, VPC Flow Logs) are compliant."
-                writeFile file: 'noncompliant-rules.txt', text: ""
-              }
             }
-          }
         }
-      }
+
+        stage('Fetch Noncompliant Resources') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
+                    script {
+                        echo "Fetching non-compliant resources from AWS Config..."
+
+                        // EC2 IMDSv2 noncompliant instances
+                        sh '''
+                        aws configservice get-compliance-details-by-config-rule \
+                            --config-rule-name EC2_IMDSv2_CHECK \
+                            --compliance-types NON_COMPLIANT \
+                            --query "EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId" \
+                            --output json > noncompliant_ec2.json || echo "No non-compliant EC2 instances"
+                        '''
+
+                        // VPC Flow Logs noncompliant VPCs
+                        sh '''
+                        aws configservice get-compliance-details-by-config-rule \
+                            --config-rule-name VPC_FLOW_LOGS_ENABLED \
+                            --compliance-types NON_COMPLIANT \
+                            --query "EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId" \
+                            --output json > noncompliant_vpcs.json || echo "No non-compliant VPCs"
+                        '''
+
+                        // S3 Bucket Versioning noncompliant buckets
+                        sh '''
+                        aws configservice get-compliance-details-by-config-rule \
+                            --config-rule-name S3_BUCKET_VERSIONING_ENABLED \
+                            --compliance-types NON_COMPLIANT \
+                            --query "EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId" \
+                            --output json > noncompliant_s3.json || echo "No non-compliant S3 buckets"
+                        '''
+
+                        // Read JSON and export as env variables for Terraform
+                        env.NONCOMPLIANT_EC2 = readJSON(file: 'noncompliant_ec2.json') ?: '[]'
+                        env.NONCOMPLIANT_VPCS = readJSON(file: 'noncompliant_vpcs.json') ?: '[]'
+                        env.NONCOMPLIANT_S3 = readJSON(file: 'noncompliant_s3.json') ?: '[]'
+
+                        echo "Non-compliant EC2 Instances: ${env.NONCOMPLIANT_EC2}"
+                        echo "Non-compliant VPCs: ${env.NONCOMPLIANT_VPCS}"
+                        echo "Non-compliant S3 Buckets: ${env.NONCOMPLIANT_S3}"
+                    }
+                }
+            }
+        }
+
+        stage('Generate Terraform Vars') {
+            steps {
+                script {
+                    def tfvarsContent = """
+                    vpc_ids = ${env.NONCOMPLIANT_VPCS}
+                    s3_bucket_ids = ${env.NONCOMPLIANT_S3}
+                    """
+                    writeFile file: 'terraform.tfvars', text: tfvarsContent
+                    echo "terraform.tfvars created with noncompliant resources"
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
+                    sh '''
+                        echo "Planning Terraform remediation..."
+                        terraform plan -input=false -no-color -var-file=terraform.tfvars -out=tfplan.out
+                        terraform show -json tfplan.out > plan.json
+                    '''
+                    archiveArtifacts artifacts: 'plan.json', fingerprint: true
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            when { expression { return params.APPLY_TF } }
+            steps {
+                input message: 'Apply Terraform changes?', ok: 'Apply'
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
+                    sh '''
+                        echo "Applying Terraform remediation..."
+                        terraform apply -input=false -no-color tfplan.out
+                    '''
+                }
+            }
+        }
     }
 
-    stage('Terraform Apply') {
-      when {
-        expression { 
-          return params.APPLY_TF && fileExists('noncompliant-rules.txt') && readFile('noncompliant-rules.txt').trim() != "" 
+    post {
+        failure { echo "Build failed. Check the logs!" }
+        always {
+            cleanWs()
         }
-      }
-      steps {
-        input message: 'Apply Terraform changes?', ok: 'Apply'
-        withCredentials([[ $class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS' ]]) {
-          sh '''
-            echo "Applying Terraform changes..."
-            terraform apply -input=false -no-color tfplan.out
-          '''
-          echo "Terraform apply completed successfully."
-        }
-      }
     }
-  }
-
-  post {
-    failure {
-      echo "Build failed. Please review the logs."
-    }
-    always {
-      script {
-        if (fileExists('plan.json')) {
-          archiveArtifacts artifacts: 'plan.json', fingerprint: true
-        }
-        if (fileExists('noncompliant-rules.txt')) {
-          archiveArtifacts artifacts: 'noncompliant-rules.txt', fingerprint: true
-        }
-      }
-      cleanWs()
-    }
-  }
 }
