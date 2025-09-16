@@ -35,7 +35,7 @@ resource "aws_iam_instance_profile" "ec2_profile" {
 # S3 Bucket
 resource "aws_s3_bucket" "app_bucket" {
   bucket = var.bucket_name
-  acl    = "private"
+  acl    = "public"
 }
 
 # VPC
