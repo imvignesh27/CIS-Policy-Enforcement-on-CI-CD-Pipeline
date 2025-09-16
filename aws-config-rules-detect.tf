@@ -91,7 +91,7 @@ resource "aws_config_delivery_channel" "main" {
   depends_on = [aws_config_configuration_recorder.main]
 }
 
-# Enable the configuration recorder (after delivery channel exists)
+# Enable the configuration recorder
 resource "aws_config_configuration_recorder_status" "enabled" {
   name       = aws_config_configuration_recorder.main.name
   is_enabled = true
@@ -99,38 +99,34 @@ resource "aws_config_configuration_recorder_status" "enabled" {
   depends_on = [aws_config_delivery_channel.main]
 }
 
-# List of AWS Managed CIS Config rules
-locals {
-  config_rules = [
-    "IAM_PASSWORD_POLICY",
-    "IAM_USER_MFA_ENABLED",
-    "IAM_ROOT_ACCESS_KEY_CHECK",
-    "S3_BUCKET_PUBLIC_READ_PROHIBITED",
-    "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
-    "S3_BUCKET_VERSIONING_ENABLED",
-    "EC2_INSTANCE_NO_PUBLIC_IP",
-    "EC2_EBS_ENCRYPTION_BY_DEFAULT",
-    "EC2_INSTANCE_DETAILED_MONITORING_ENABLED",
-    "VPC_FLOW_LOGS_ENABLED",
-    "VPC_DEFAULT_SECURITY_GROUP_CLOSED",
-    "VPC_SG_OPEN_ONLY_TO_AUTHORIZED_PORTS",
-    "ALB_WAF_ENABLED",
-    "ALB_HTTP_TO_HTTPS_REDIRECTION_CHECK",
-    "ELBV2_LOGGING_ENABLED",
-    "NLB_CROSS_ZONE_LOAD_BALANCING_ENABLED",
-    "NLB_LOGGING_ENABLED",
-    "NLB_INTERNAL_SCHEME_CHECK"
-  ]
-}
+# ------------------------
+# Config Rules (Only 2)
+# ------------------------
 
-# Create AWS Config rules dynamically
-resource "aws_config_config_rule" "cis_rules" {
-  for_each = toset(local.config_rules)
+# Rule 1: EC2 instances must use IMDSv2
+resource "aws_config_config_rule" "ec2_imds" {
+  name = "ec2-imdsv2-check"
 
-  name = lower(each.key)
   source {
     owner             = "AWS"
-    source_identifier = each.key
+    source_identifier = "EC2_IMDSV2_CHECK"
+  }
+
+  depends_on = [aws_config_configuration_recorder_status.enabled]
+
+  tags = {
+    Project = "CIS-Compliance"
+    Owner   = "SecurityTeam"
+  }
+}
+
+# Rule 2: VPCs must have flow logs enabled
+resource "aws_config_config_rule" "vpc_flow_logs" {
+  name = "vpc-flow-logs-enabled"
+
+  source {
+    owner             = "AWS"
+    source_identifier = "VPC_FLOW_LOGS_ENABLED"
   }
 
   depends_on = [aws_config_configuration_recorder_status.enabled]
