@@ -19,5 +19,5 @@ variable "bucket_name" {
 variable "s3_bucket_name" {
   description = "S3 bucket name for VPC Flow Logs"
   type        = string
-  default     = "vpc-flow-log-vignesh"
+  default     = "vpc-flow-log-vignesh-reva"
 }
