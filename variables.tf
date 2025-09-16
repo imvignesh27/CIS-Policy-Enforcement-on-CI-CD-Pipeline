@@ -1,5 +1,5 @@
 variable "aws_region" {
-  default = "us-east-1"
+  default = "ap-south-1"
 }
 
 variable "instance_type" {
@@ -14,4 +14,10 @@ variable "key_name" {
 variable "bucket_name" {
   description = "race-bucket-project2"
   type        = string
+}
+
+variable "s3_bucket_name" {
+  description = "S3 bucket name for VPC Flow Logs"
+  type        = string
+  default     = "vpc-flow-log-vignesh"
 }
