@@ -170,3 +170,11 @@ resource "aws_lb_target_group_attachment" "nlb_attachment" {
   target_id        = aws_instance.web.id
   port             = 80
 }
+
+# Compliance
+module "compliance" {
+  source       = "./modules/compliance"
+  prefix       = "cis-project"
+  vpc_ids      = var.vpc_ids
+  s3_bucket_ids = var.s3_bucket_ids
+}
