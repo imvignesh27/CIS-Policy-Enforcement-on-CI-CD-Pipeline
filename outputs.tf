@@ -21,3 +21,15 @@ output "config_recorder_name" {
 output "iam_role_arn" {
   value = aws_iam_role.config_role.arn
 }
+
+output "flow_logs_bucket" {
+  value = aws_s3_bucket.flow_logs.bucket
+}
+
+output "flow_logs_role" {
+  value = aws_iam_role.flow_logs_role.arn
+}
+
+output "enabled_vpc_flow_logs" {
+  value = { for k, v in aws_flow_log.vpc : k => v.id }
+}
