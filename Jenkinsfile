@@ -54,21 +54,33 @@ pipeline {
         withCredentials([[ $class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS' ]]) {
           catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
             script {
-              def result = sh(script: '''
-                echo "🔍 Running AWS Config compliance check..."
-                aws configservice describe-compliance-by-config-rule \
-                  --region $AWS_DEFAULT_REGION \
-                  --output json > aws-config-compliance.json
-              ''', returnStatus: true)
+              def rules = ["ec2-imdsv2-check", "vpc-flow-logs-enabled"]
+              def nonCompliantRules = []
 
-              if (result != 0 || !fileExists('aws-config-compliance.json')) {
-                error("AWS Config compliance check failed.")
+              for (rule in rules) {
+                def status = sh(
+                  script: """
+                    aws configservice describe-compliance-by-config-rule \
+                      --config-rule-names ${rule} \
+                      --region $AWS_DEFAULT_REGION \
+                      --query 'ComplianceByConfigRules[0].Compliance.ComplianceType' \
+                      --output text
+                  """,
+                  returnStdout: true
+                ).trim()
+
+                if (status == "NON_COMPLIANT") {
+                  nonCompliantRules << rule
+                }
               }
 
-              def complianceData = readFile('aws-config-compliance.json')
-              def nonCompliantCount = complianceData.count("NON_COMPLIANT")
-
-              echo "Compliance check completed. Non-compliant rules: ${nonCompliantCount}"
+              if (nonCompliantRules.size() > 0) {
+                echo "Found non-compliant rules: ${nonCompliantRules.join(', ')}"
+                writeFile file: 'noncompliant-rules.txt', text: nonCompliantRules.join(',')
+              } else {
+                echo "All monitored rules (IMDSv2, VPC Flow Logs) are compliant."
+                writeFile file: 'noncompliant-rules.txt', text: ""
+              }
             }
           }
         }
@@ -77,7 +89,9 @@ pipeline {
 
     stage('Terraform Apply') {
       when {
-        expression { return params.APPLY_TF }
+        expression { 
+          return params.APPLY_TF && fileExists('noncompliant-rules.txt') && readFile('noncompliant-rules.txt').trim() != "" 
+        }
       }
       steps {
         input message: 'Apply Terraform changes?', ok: 'Apply'
@@ -101,8 +115,8 @@ pipeline {
         if (fileExists('plan.json')) {
           archiveArtifacts artifacts: 'plan.json', fingerprint: true
         }
-        if (fileExists('aws-config-compliance.json')) {
-          archiveArtifacts artifacts: 'aws-config-compliance.json', fingerprint: true
+        if (fileExists('noncompliant-rules.txt')) {
+          archiveArtifacts artifacts: 'noncompliant-rules.txt', fingerprint: true
         }
       }
       cleanWs()
