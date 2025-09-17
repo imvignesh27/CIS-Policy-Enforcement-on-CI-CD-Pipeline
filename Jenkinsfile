@@ -1,14 +1,11 @@
 pipeline {
     agent any
-
     environment {
         AWS_DEFAULT_REGION = 'ap-south-1'
     }
-
     parameters {
         booleanParam(name: 'APPLY_TF', defaultValue: false, description: 'Set to true to apply Terraform changes')
     }
-
     stages {
         stage('Checkout Code') {
             steps {
@@ -16,7 +13,6 @@ pipeline {
                     url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
             }
         }
-
         stage('Terraform Init & Plan') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
@@ -25,10 +21,8 @@ pipeline {
                             sh '''
                                 echo "Formatting Terraform files..."
                                 terraform fmt -recursive
-
                                 echo "Initializing Terraform..."
                                 terraform init -input=false -no-color
-
                                 echo "Validating Terraform configuration..."
                                 terraform validate
                             '''
@@ -37,45 +31,39 @@ pipeline {
                 }
             }
         }
-
         stage('Fetch Noncompliant Resources') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
                     script {
                         echo "Fetching non-compliant resources from AWS Config..."
-
                         // EC2 IMDSv2 noncompliant instances
                         sh '''
                         aws configservice get-compliance-details-by-config-rule \
                             --config-rule-name EC2_IMDSv2_CHECK \
                             --compliance-types NON_COMPLIANT \
                             --query "EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId" \
-                            --output json > noncompliant_ec2.json || echo "No non-compliant EC2 instances"
+                            --output json > noncompliant_ec2.json || echo "[]" > noncompliant_ec2.json
                         '''
-
                         // VPC Flow Logs noncompliant VPCs
                         sh '''
                         aws configservice get-compliance-details-by-config-rule \
                             --config-rule-name VPC_FLOW_LOGS_ENABLED \
                             --compliance-types NON_COMPLIANT \
                             --query "EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId" \
-                            --output json > noncompliant_vpcs.json || echo "No non-compliant VPCs"
+                            --output json > noncompliant_vpcs.json || echo "[]" > noncompliant_vpcs.json
                         '''
-
                         // S3 Bucket Versioning noncompliant buckets
                         sh '''
                         aws configservice get-compliance-details-by-config-rule \
                             --config-rule-name S3_BUCKET_VERSIONING_ENABLED \
                             --compliance-types NON_COMPLIANT \
                             --query "EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId" \
-                            --output json > noncompliant_s3.json || echo "No non-compliant S3 buckets"
+                            --output json > noncompliant_s3.json || echo "[]" > noncompliant_s3.json
                         '''
-
-                        // Read JSON and export as env variables for Terraform
-                        env.NONCOMPLIANT_EC2 = readJSON(file: 'noncompliant_ec2.json') ?: '[]'
-                        env.NONCOMPLIANT_VPCS = readJSON(file: 'noncompliant_vpcs.json') ?: '[]'
-                        env.NONCOMPLIANT_S3 = readJSON(file: 'noncompliant_s3.json') ?: '[]'
-
+                        // Ensure reading always succeeds, assign a JSON representation even on empty/error.
+                        env.NONCOMPLIANT_EC2 = readFile('noncompliant_ec2.json').trim() ?: '[]'
+                        env.NONCOMPLIANT_VPCS = readFile('noncompliant_vpcs.json').trim() ?: '[]'
+                        env.NONCOMPLIANT_S3 = readFile('noncompliant_s3.json').trim() ?: '[]'
                         echo "Non-compliant EC2 Instances: ${env.NONCOMPLIANT_EC2}"
                         echo "Non-compliant VPCs: ${env.NONCOMPLIANT_VPCS}"
                         echo "Non-compliant S3 Buckets: ${env.NONCOMPLIANT_S3}"
@@ -83,7 +71,6 @@ pipeline {
                 }
             }
         }
-
         stage('Generate Terraform Vars') {
             steps {
                 script {
@@ -96,7 +83,6 @@ pipeline {
                 }
             }
         }
-
         stage('Terraform Plan') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
@@ -109,7 +95,6 @@ pipeline {
                 }
             }
         }
-
         stage('Terraform Apply') {
             when { expression { return params.APPLY_TF } }
             steps {
@@ -123,7 +108,6 @@ pipeline {
             }
         }
     }
-
     post {
         failure { echo "Build failed. Check the logs!" }
         always {
