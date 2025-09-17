@@ -35,7 +35,7 @@ resource "aws_vpc" "new_vpc" {
 resource "aws_internet_gateway" "new_igw" {
   vpc_id = aws_vpc.new_vpc.id
   tags = {
-    Name = "new_igw"
+    Name = "new-internet-gateway"
   }
 }
 
@@ -74,8 +74,12 @@ resource "aws_route_table" "private_route_table" {
 }
 
 resource "aws_eip" "nat_eip" {
-  vpc = true
+  # allocation_id or association arguments depending on use case
+  tags = {
+    Name = "nat-eip"
+  }
 }
+
 
 resource "aws_nat_gateway" "my_nat_gateway" {
   allocation_id = aws_eip.nat_eip.id
