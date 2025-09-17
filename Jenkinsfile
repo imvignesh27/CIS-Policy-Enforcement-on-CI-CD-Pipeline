@@ -13,7 +13,7 @@ pipeline {
                     url: 'https://github.com/imvignesh27/CIS-Policy-Enforcement-on-CI-CD-Pipeline.git'
             }
         }
-        stage('Terraform Init & Plan') {
+        stage('Terraform Init & Validate') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
                     catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
@@ -36,37 +36,54 @@ pipeline {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
                     script {
                         echo "Fetching non-compliant resources from AWS Config..."
-                        // EC2 IMDSv2 noncompliant instances
                         sh '''
                         aws configservice get-compliance-details-by-config-rule \
                             --config-rule-name EC2_IMDSv2_CHECK \
                             --compliance-types NON_COMPLIANT \
                             --query "EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId" \
                             --output json > noncompliant_ec2.json || echo "[]" > noncompliant_ec2.json
-                        '''
-                        // VPC Flow Logs noncompliant VPCs
-                        sh '''
+
                         aws configservice get-compliance-details-by-config-rule \
                             --config-rule-name VPC_FLOW_LOGS_ENABLED \
                             --compliance-types NON_COMPLIANT \
                             --query "EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId" \
                             --output json > noncompliant_vpcs.json || echo "[]" > noncompliant_vpcs.json
-                        '''
-                        // S3 Bucket Versioning noncompliant buckets
-                        sh '''
+
                         aws configservice get-compliance-details-by-config-rule \
                             --config-rule-name S3_BUCKET_VERSIONING_ENABLED \
                             --compliance-types NON_COMPLIANT \
                             --query "EvaluationResults[].EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId" \
                             --output json > noncompliant_s3.json || echo "[]" > noncompliant_s3.json
                         '''
-                        // Ensure reading always succeeds, assign a JSON representation even on empty/error.
                         env.NONCOMPLIANT_EC2 = readFile('noncompliant_ec2.json').trim() ?: '[]'
                         env.NONCOMPLIANT_VPCS = readFile('noncompliant_vpcs.json').trim() ?: '[]'
                         env.NONCOMPLIANT_S3 = readFile('noncompliant_s3.json').trim() ?: '[]'
                         echo "Non-compliant EC2 Instances: ${env.NONCOMPLIANT_EC2}"
                         echo "Non-compliant VPCs: ${env.NONCOMPLIANT_VPCS}"
                         echo "Non-compliant S3 Buckets: ${env.NONCOMPLIANT_S3}"
+                    }
+                }
+            }
+        }
+        stage('AWS CLI Remediation') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS']]) {
+                    script {
+                        echo "Remediating S3 Buckets for Versioning..."
+                        sh """
+                        for bucket in \$(echo '${env.NONCOMPLIANT_S3}' | jq -r '.[]'); do
+                            echo "Enabling versioning on bucket: \$bucket"
+                            aws s3api put-bucket-versioning --bucket "\$bucket" --versioning-configuration Status=Enabled
+                        done
+                        """
+
+                        echo "Remediating EC2 Instances for IMDSv2..."
+                        sh """
+                        for instanceId in \$(echo '${env.NONCOMPLIANT_EC2}' | jq -r '.[]'); do
+                            echo "Modifying instance metadata options for instance: \$instanceId"
+                            aws ec2 modify-instance-metadata-options --instance-id "\$instanceId" --http-tokens required --http-endpoint enabled
+                        done
+                        """
                     }
                 }
             }
