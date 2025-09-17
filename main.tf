@@ -1,7 +1,7 @@
 #======== provider ==========#
 
 provider "aws" {
-  region = "ap-south-1a"
+  region = "ap-south-1"
 }
 
 #===========  IAM USER  ==========#
@@ -33,7 +33,7 @@ resource "aws_vpc" "new_vpc" {
 }
 
 resource "aws_internet_gateway" "new_igw" {
-  vpc_id = aws_vpc.my_vpc.id
+  vpc_id = aws_vpc.new_vpc.id
   tags = {
     Name = "new_igw"
   }
@@ -104,7 +104,7 @@ resource "aws_route_table_association" "private_subnet_association" {
 #=======  Security Groups ===========#
 
 resource "aws_security_group" "private_sg" {
-  vpc_id = aws_vpc.my_vpc.id
+  vpc_id = aws_vpc.new_vpc.id
   tags = {
     Name = "private_sg"
   }
@@ -123,7 +123,7 @@ resource "aws_security_group" "private_sg" {
 }
 
 resource "aws_security_group" "public_sg" {
-  vpc_id = aws_vpc.my_vpc.id
+  vpc_id = aws_vpc.new_vpc.id
   tags = {
     Name = "public_sg"
   }
