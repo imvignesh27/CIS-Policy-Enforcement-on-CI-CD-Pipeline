@@ -1,82 +1,133 @@
-# Fetch available AZs
-data "aws_availability_zones" "available" {}
+#===========  IAM USER  ==========#
 
-# IAM Role & Policy
-resource "aws_iam_role" "ec2_role" {
-  name = "ec2_basic_role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Principal = { Service = "ec2.amazonaws.com" },
-      Action = "sts:AssumeRole"
-    }]
-  })
-}
+module "iam_user" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-user"
 
-resource "aws_iam_role_policy" "ec2_policy" {
-  name   = "ec2_basic_policy"
-  role   = aws_iam_role.ec2_role.id
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Action = ["s3:ListBucket", "s3:GetObject"],
-      Resource = "*"
-    }]
-  })
-}
+  name = "terra.user1"
 
-resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "ec2_profile"
-  role = aws_iam_role.ec2_role.name
-}
+  force_destroy           = true
+  pgp_key                 = "keybase:test"
+  password_reset_required = false
 
-# S3 Bucket
-resource "aws_s3_bucket" "app_bucket" {
-  bucket = var.bucket_name
-  acl    = "public"
-}
-
-# VPC
-resource "aws_vpc" "main" {
-  cidr_block = "20.0.0.0/16"
-}
-
-# Subnets in two AZs
-resource "aws_subnet" "subnet_a" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "20.0.1.0/24"
-  availability_zone = data.aws_availability_zones.available.names[0]
-}
-
-resource "aws_subnet" "subnet_b" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "20.0.2.0/24"
-  availability_zone = data.aws_availability_zones.available.names[1]
-}
-
-# Security Group
-resource "aws_security_group" "web_sg" {
-  name        = "web_sg"
-  description = "Allow SSH and HTTP"
-  vpc_id      = aws_vpc.main.id
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  tags = {
+    Terraform   = "true"
+    Environment = "dev"
   }
+}
 
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+#==========  VPC  ===========#
+
+resource "aws_vpc" "new_vpc" {
+  cidr_block = "10.0.0.0/16"
+  enable_dns_support = true
+  enable_dns_hostnames = true
+  tags = {
+    Name = "new_vpc"
   }
+}
 
+resource "aws_internet_gateway" "new_igw" {
+  vpc_id = aws_vpc.my_vpc.id
+  tags = {
+    Name = "new_igw"
+  }
+}
+
+resource "aws_subnet" "public_subnet" {
+  vpc_id                  = aws_vpc.new_vpc.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "ap-south-1a" 
+  map_public_ip_on_launch = true
+  tags = {
+    Name = "public_subnet"
+  }
+}
+
+resource "aws_subnet" "private_subnet" {
+  vpc_id                  = aws_vpc.new_vpc.id
+  cidr_block              = "10.0.2.0/24"
+  availability_zone       = "ap-south-1a"
+  tags = {
+    Name = "private_subnet"
+  }
+}
+
+resource "aws_route_table" "public_route_table" {
+  vpc_id = aws_vpc.new_vpc.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.my_igw.id
+  }
+  tags = {
+    Name = "public_route_table"
+  }
+}
+
+resource "aws_route_table" "private_route_table" {
+  vpc_id = aws_vpc.new_vpc.id
+}
+
+resource "aws_eip" "nat_eip" {
+  vpc = true
+}
+
+resource "aws_nat_gateway" "my_nat_gateway" {
+  allocation_id = aws_eip.nat_eip.id
+  subnet_id     = aws_subnet.public_subnet.id
+  tags = {
+    Name = "my_nat_gateway"
+  }
+}
+
+resource "aws_route" "private_route" {
+  route_table_id         = aws_route_table.private_route_table.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.my_nat_gateway.id
+}
+
+resource "aws_route_table_association" "public_subnet_association" {
+  subnet_id      = aws_subnet.public_subnet.id
+  route_table_id = aws_route_table.public_route_table.id
+}
+
+resource "aws_route_table_association" "private_subnet_association" {
+  subnet_id      = aws_subnet.private_subnet.id
+  route_table_id = aws_route_table.private_route_table.id
+}
+
+#=======  Security Groups ===========#
+
+resource "aws_security_group" "private_sg" {
+  vpc_id = aws_vpc.my_vpc.id
+  tags = {
+    Name = "private_sg"
+  }
   egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = []
+  }
+}
+
+resource "aws_security_group" "public_sg" {
+  vpc_id = aws_vpc.my_vpc.id
+  tags = {
+    Name = "public_sg"
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -84,97 +135,22 @@ resource "aws_security_group" "web_sg" {
   }
 }
 
-# EC2 Instance
-resource "aws_instance" "web" {
-  ami                    = "ami-0b9093ea00a0fed922"
-  instance_type          = var.instance_type
-  subnet_id              = aws_subnet.subnet_a.id
-  key_name               = var.key_name
-  security_groups        = [aws_security_group.web_sg.name]
-  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+#======  S3  ======#
 
-  tags = {
-    Name = "Jenkins-Terraform-EC2"
+module "s3_bucket" {
+  source = "terraform-aws-modules/s3-bucket/aws"
+
+  bucket = "vignesh27-bucket"
+  acl    = "public"
+
+  control_object_ownership = true
+  object_ownership         = "ObjectWriter
+
+  versioning = {
+    enabled = false
   }
 }
 
-# ALB
-resource "aws_lb" "app_alb" {
-  name               = "app-alb"
-  internal           = false
-  load_balancer_type = "application"
-  subnets            = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
-  security_groups    = [aws_security_group.web_sg.id]
-}
+#==========  EC2  =============#
 
-# ALB Target Group
-resource "aws_lb_target_group" "alb_tg" {
-  name        = "alb-target-group"
-  port        = 80
-  protocol    = "HTTP"
-  vpc_id      = aws_vpc.main.id
-  target_type = "instance"
-}
 
-# ALB Listener
-resource "aws_lb_listener" "alb_listener" {
-  load_balancer_arn = aws_lb.app_alb.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.alb_tg.arn
-  }
-}
-
-# ALB Target Attachment
-resource "aws_lb_target_group_attachment" "alb_attachment" {
-  target_group_arn = aws_lb_target_group.alb_tg.arn
-  target_id        = aws_instance.web.id
-  port             = 80
-}
-
-# NLB
-resource "aws_lb" "app_nlb" {
-  name               = "app-nlb"
-  internal           = false
-  load_balancer_type = "network"
-  subnets            = [aws_subnet.subnet_a.id, aws_subnet.subnet_b.id]
-}
-
-# NLB Target Group
-resource "aws_lb_target_group" "nlb_tg" {
-  name        = "nlb-target-group"
-  port        = 80
-  protocol    = "TCP"
-  vpc_id      = aws_vpc.main.id
-  target_type = "instance"
-}
-
-# NLB Listener
-resource "aws_lb_listener" "nlb_listener" {
-  load_balancer_arn = aws_lb.app_nlb.arn
-  port              = 80
-  protocol          = "TCP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.nlb_tg.arn
-  }
-}
-
-# NLB Target Attachment
-resource "aws_lb_target_group_attachment" "nlb_attachment" {
-  target_group_arn = aws_lb_target_group.nlb_tg.arn
-  target_id        = aws_instance.web.id
-  port             = 80
-}
-
-# Compliance
-module "compliance" {
-  source       = "./modules/compliance"
-  prefix       = "cis-project"
-  vpc_ids      = var.vpc_ids
-  s3_bucket_ids = var.s3_bucket_ids
-}
