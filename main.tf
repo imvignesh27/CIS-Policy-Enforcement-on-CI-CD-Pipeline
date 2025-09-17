@@ -1,3 +1,9 @@
+#======== provider ==========#
+
+provider "aws" {
+  region = "ap-south-1a"
+}
+
 #===========  IAM USER  ==========#
 
 module "iam_user" {
