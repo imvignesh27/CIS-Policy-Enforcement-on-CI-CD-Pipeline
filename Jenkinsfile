@@ -84,6 +84,23 @@ pipeline {
                             aws ec2 modify-instance-metadata-options --instance-id "\$instanceId" --http-tokens required --http-endpoint enabled
                         done
                         """
+
+                        echo "Remediating VPCs for Flow Logs..."
+                        // Update this ARN with your actual IAM role for flow log delivery
+                        def flowLogRoleArn = "arn:aws:iam::123456789012:role/FlowLogsRole"
+
+                        sh """
+                        for vpc_id in \$(echo '${env.NONCOMPLIANT_VPCS}' | jq -r '.[]'); do
+                            echo "Creating flow log for VPC: \$vpc_id"
+                            aws ec2 create-flow-logs \\
+                                --resource-type VPC \\
+                                --resource-ids \$vpc_id \\
+                                --traffic-type ALL \\
+                                --log-destination-type CloudWatchLogs \\
+                                --log-group-name "/aws/vpc/flow-logs" \\
+                                --deliver-logs-permission-arn ${flowLogRoleArn} || echo "Flow log already exists or failed for \$vpc_id"
+                        done
+                        """
                     }
                 }
             }
