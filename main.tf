@@ -143,20 +143,23 @@ resource "aws_security_group" "public_sg" {
 
 #======  S3  ======#
 
-module "s3_bucket" {
-  source = "terraform-aws-modules/s3-bucket/aws"
+resource "aws_s3_bucket" "my_bucket" {
+  bucket = "new-vignesh-bucket"
+}
 
-  bucket = "vignesh27-bucket"
-  acl    = "public"
-
-  control_object_ownership = true
-  object_ownership         = "ObjectWriter
-
-  versioning = {
-    enabled = false
-  }
+resource "aws_s3_bucket_acl" "bucket_acl" {
+  bucket = aws_s3_bucket.my_bucket.id
+  acl    = "public-read"
 }
 
 #==========  EC2  =============#
 
+resource "aws_instance" "ubuntu-server" {
+  ami           = "ami-0f2e255ec956ade7f"
+  instance_type = "t2.micro"              
+
+  tags = {
+    Name = "UbuntuServer"
+  }
+}
 
