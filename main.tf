@@ -7,7 +7,7 @@ provider "aws" {
 #===========  IAM USER  ==========#
 
 module "iam_user" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-user"
+  source  = "terraform-aws-modules/iam/aws/modules/iam-user"
 
   name = "terra.user1"
 
